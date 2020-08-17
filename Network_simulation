@@ -1,0 +1,152 @@
+#### Script to simulate the effects of genetic correlations in network of species interactions
+require(plyr)
+require(dplyr)
+require(ggplot2)
+require(cowplot)
+require(GGally)
+require(bipartite)
+
+list.files(path="./Ant_Myr")
+
+
+mod.rede <- list()
+
+for(i in 1:length(list.files("./Ant_Myr"))){
+  mod.rede[[i]] <- 
+    as.matrix(read.table( list.files("./Ant_Myr" , full.names = TRUE)[i], header=F,  row.names=NULL))
+  
+}
+
+ani.rede <- list()
+for(i in 1:length(list.files("./Pol_P" ,pattern=".txt", full.names = TRUE))){
+  ani.rede[[i]] <- 
+    as.matrix(read.table( list.files("./Pol_P" ,pattern=".txt", full.names = TRUE)[i], header=F,  row.names=NULL))
+  
+}
+
+llply(ani.rede, dim)
+llply(mod.rede, dim)
+length(mod.rede)
+ggnet2(network(mod.rede[[8]][6:24,6:15]), label=TRUE)
+#mod.rede[[8]]<- mod.rede[[8]][6:24,6:15]
+dim(mod.rede[[8]])
+################ selecionar duas redes que tenham riqueza parecida!
+
+names(ani.rede) <- list.files("./Pol_P" ,pattern=".txt", full.names = TRUE)
+names(mod.rede) <- list.files("./Ant_Myr" ,pattern=".txt", full.names = TRUE)
+
+for(i in 1:length(ani.rede)) dimnames(ani.rede[[i]])[[1]] <- paste("plant", 1:nrow(ani.rede[[i]]), sep=".") 
+for(i in 1:length(mod.rede)) dimnames(mod.rede[[i]])[[1]] <- paste("plant", 1:nrow(mod.rede[[i]]), sep=".") 
+
+
+laply(ani.rede, dim)
+##############
+
+range(laply(ani.rede, function(x) nrow(x)+ncol(x)))
+laply(mod.rede, function(x) nrow(x)+ncol(x))
+
+##### read network metrics file
+
+metricas <- read.csv("metricas.csv", sep=";", header=TRUE, row.names = 1) ## file with network structure metrics
+nrow(metricas)
+
+length(mod.rede) + length(ani.rede)
+gsub(names(mod.rede), pattern="./Ant_Myr/", replacement = "") %in% rownames(metricas)
+gsub(names(ani.rede), pattern="./Pol_P/", replacement = "") %in% rownames(metricas)
+
+names(redes)
+
+redes.nomes <- c(gsub(names(mod.rede), pattern="./Ant_Myr/", replacement = ""), gsub(names(ani.rede), pattern="./Pol_P/", replacement = ""))
+###################
+##############
+met.2 <- metricas[redes.nomes,]
+met.2 <- met.2[,c("ST","C", "Relative_M", "Relative_N")]
+means <- apply(met.2, 2, mean)
+sds <- apply(met.2, 2, sd)
+met.3 <- met.2
+for(i in 1:4) met.3[,i] <- (met.2[,i]-means[i]) /sds[i]
+colnames(met.3)
+eigen(cov(met.3))$values/sum(eigen(cov(met.3))$values)
+
+met.2$pc1 <- prcomp(met.3)$x[,1] ## projecao no primeiro pc
+met.2$pc2 <- prcomp(met.3)$x[,2] ## projecao no primeiro pc
+#################
+#### time to achieve equilibrium, analytical
+
+names(ani.rede)
+ggnet(ani.rede[[3]])
+llply(redes, function(x) which(rowSums(x)==0))
+
+llply(redes, function(x) which(colSums(x)==0))
+
+
+
+redes$`./Ant_Myr/B_SY-AP1-davidson-et-al-1989.txt` <- redes$`./Ant_Myr/B_SY-AP1-davidson-et-al-1989.txt`[rowSums(redes$`./Ant_Myr/B_SY-AP1-davidson-et-al-1989.txt`)!=0,]
+redes$`./Ant_Myr/B_SY-AP1-davidson-et-al-1989.txt` <- redes$`./Ant_Myr/B_SY-AP1-davidson-et-al-1989.txt`[,colSums(redes$`./Ant_Myr/B_SY-AP1-davidson-et-al-1989.txt`)!=0]
+redes$`./Pol_P/B_NS-PP-ramirez_1992.txt` <- redes$`./Pol_P/B_NS-PP-ramirez_1992.txt`[,colSums(redes$`./Pol_P/B_NS-PP-ramirez_1992.txt`) !=0]
+
+autos.no.cor <- list()
+for(i in 1:length(redes)){
+  matrizR <- matriz.R.generator(redes[[i]])
+  omegas=diag(c(rep(10,ncol(redes[[i]]) ), rep(10, nrow(redes[[i]]))),nrow(matrizR),nrow(matrizR)) 
+  autos.no.cor[[i]] <- auto.valores.laplacian(Gezao=G.matrix.maker(cor=list(animal=0.0, plant=0.0), n.animal=ncol(redes[[i]]), n.plant=nrow(redes[[i]])),
+                         matrizR, omegas)
+  
+}
+
+
+autos.high.cor <- list()
+for(i in 1:length(redes)){
+  matrizR <- matriz.R.generator(redes[[i]])
+  omegas=diag(c(rep(10,ncol(redes[[i]]) ), rep(10, nrow(redes[[i]]))),nrow(matrizR),nrow(matrizR)) 
+  autos.high.cor[[i]] <- auto.valores.laplacian(Gezao=G.matrix.maker(cor=list(animal=0.8, plant=0.8), n.animal=ncol(redes[[i]]), n.plant=nrow(redes[[i]])),
+                                              matrizR, omegas)
+  
+}
+
+autos.no.cor[[7]]
+met.2
+for(i in 1: length(autos.no.cor))met.2$auto.no.cor[i] <- autos.no.cor[[i]][round(autos.no.cor[[i]],5)!=1][1]
+for(i in 1: length(autos.high.cor))met.2$auto.high.cor[i] <- autos.high.cor[[i]][round(autos.high.cor[[i]],5)!=1][1]
+
+
+rownames(met.2)
+met.2$tipo.rede <- c(rep("ant-p", 8), rep("pol-p",28 ))
+ggplot(met.2) + geom_point(aes(x=pc1, y=auto.no.cor, col=tipo.rede),alpha=0.5, size=2)+
+  geom_point(aes(x=pc1, y=auto.high.cor, col=tipo.rede),  size=2)+
+  geom_smooth(aes(x=pc1, y=auto.high.cor),method="lm", se=F, col="gray30")+
+  geom_smooth(aes(x=pc1, y=auto.no.cor),method="lm", se=F, col="gray80")+
+  scale_color_manual(values = c( "#453781FF","#29AF7FFF"))+
+  geom_linerange(aes(x=pc1, ymin=auto.no.cor, ymax=auto.high.cor, col=tipo.rede), alpha=0.3)+
+  xlab("PC1")+
+  ylab("time to achieve matching")+
+  theme(legend.position = "none")
+
+RES.no.cor <- list()
+for(i in 1:length(redes)){
+  matrizR <- matriz.R.generator(redes[[i]])
+  omegas=diag(10,nrow(matrizR),nrow(matrizR)) 
+  Gezao=G.matrix.maker(cor=list(animal=0.0, plant=0.0), n.animal=ncol(redes[[i]]), n.plant=nrow(redes[[i]]))
+  RES.no.cor[[i]] <- cor.mut.func(Gezao=Gezao, R=matrizR, n.simul=50, tempo=3000, omega=omegas)
+  
+}
+names(RES.no.cor) <- names(redes)
+for(i in 1:length(RES.no.cor)){
+  RES.no.cor[[i]]$mean.vel <- apply(RES.no.cor[[i]][,grep(colnames(RES.no.cor[[i]]), pattern="vel")], 1, "mean")  
+}
+
+
+
+
+time.to.eq.no.cor <- list()
+for(i in 1:length(RES.no.cor)){
+time.to.eq.no.cor[[i]] <- ldply(split(RES.no.cor[[i]], RES.no.cor[[i]]$n.simul), function(x) which(x$mean.vel <10e-5)[1])  
+}
+
+
+names(time.to.eq.no.cor) <- names(redes)
+for(i in 1:length(redes)) time.to.eq.no.cor[[i]]$rede <- names(redes)[[i]]
+
+times <- ldply(time.to.eq.no.cor, "identity")
+
+times$tipo <- substr(times$rede, start=3, stop=7)
