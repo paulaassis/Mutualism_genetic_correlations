@@ -1,0 +1,149 @@
+
+#### analytical estimation
+
+### uses functions of simul_mut_matriz script
+Ga <- G.matrix.maker(cor= cor.mut[[1]]$cor.a[1]) ## building G-matrix
+Gb <- G.matrix.maker(cor= cor.mut[[1]]$cor.a[1])
+Gezao <- Gezao.func(Ga,Gb) ## combined G-matrix both species
+A <- Gezao%*% solve(omega+Gezao) ##omega is a matrix of the slope of adaptive landscape (no correlational selection)
+R <- matriz.R.func() ## interaction matrix
+
+
+I <- diag(1,4) ## identity matrix
+mat.T <-  I + A%*%R -A ### Analytical expression
+eigen(mat.T) 
+
+auto.valores.laplacian <- function(cor.1, cor.2){ ## estimating eigenvalues of the Laplacian matrix
+  Ga <- G.matrix.maker(cor= cor.1)
+  Gb <- G.matrix.maker(cor= cor.2)
+  Gezao <- Gezao.func(Ga,Gb)
+  A <- Gezao%*% solve(omega+Gezao)
+  R <-R
+  mat.T <-   diag(1,4)+A%*%R -A
+  auto <- sort(abs(eigen(mat.T)$values), decreasing = TRUE) ## eigen.values of T matrix
+  vectors <- (eigen(mat.T)$vectors)
+  return(auto)
+}
+
+auto <- list()
+
+for(i in 1: nrow(x)){
+  auto[[i]]<- auto.valores.laplacian(cor.1=x[i,1], cor.2=x[i,2])
+} ## estimate it for several different genetic correlations combinations
+
+auto
+head(cor.mut[[1]])
+#######################################################
+for(i in 1:length(cor.mut)){
+  cor.mut[[i]][,7:10] <- log(cor.mut[[i]] [,7:10])
+} ## uses list of data simulated in script simul_mut_matriz
+
+for(i in 1:length(cor.mut)){
+  cor.mut[[i]]$mean.log.vel <- apply(cor.mut[[i]][,7:10],1,mean)
+}  ### observed valocity to equilibrium in log
+
+
+head(cor.mut[[1]])
+
+COF <- list() ## estimates coefficient of linear regression
+for(j in 1:length(cor.mut)){
+  xx<- split(cor.mut[[j]], cor.mut[[j]]$n.simul) 
+  coef <- c()
+  
+  for(i in 1:100){
+ teste <- xx[[i]][1:which(xx[[i]]$mean.log.vel==-Inf)[1]-1,]
+    coef[i]<-  exp(coef(lm(teste$mean.log.vel~teste$geracao))[2])
+    COF[[j]] <- coef
+  }
+}
+COF
+
+cof.2 <- list()
+for(i in 1:length(COF)){
+  cof.2[[i]] <- as.data.frame(COF[[i]])
+}
+
+for(i in 1:length(COF)){
+  cof.2[[i]]$cor.1 <- x[i,1]
+  cof.2[[i]]$cor.2 <- x[i,2]
+}
+
+autos <- data.frame(lambda=ldply(auto)[,3])
+autos$cor.1 <- x[,1]
+autos$cor.2 <- x[,2]
+
+
+
+mean(cof.2[[225]][,1])
+
+cof.2[[225]]$tipo <- "high.cor" ## high correlation example
+cof.2[[113]]$tipo <- "no.cor" ## no correlation example
+cof.2[[211]]$tipo <- "dif.cor" ## high antagonistic correlation example
+
+cof.2 <- list(cof.2[[225]],
+cof.2[[211]],
+cof.2[[113]])
+
+auau <- autos[c(113,211,225),]
+
+cof.2 <- ldply(cof.2)
+colnames(cof.2) <- c("lambda", "cor.1", "cor.2", "tipo")
+auau$tipo <- c("no.cor", "dif.cor", "high.cor")
+
+head(cof.2)
+
+require(ggplot2)
+require(viridis)
+require(cowplot)
+
+##plots!
+ggplot(autos) + geom_tile(aes(x=cor.1, y=cor.2, fill=lambda))+
+   scale_fill_distiller(palette = "Spectral")+
+  #scale_fill_viridis()+
+  xlab("correlation species 1")+
+  ylab("correlation species 2")
+ggsave("analitico_heatmap.pdf", width=6, height = 5)  
+
+
+auau$tipo <- factor(auau$tipo, levels = c("no.cor", "dif.cor", "high.cor"))
+cof.2$tipo <- factor(cof.2$tipo, levels = c("no.cor", "dif.cor", "high.cor"))
+
+
+ggplot(cof.2) + geom_jitter(aes(x=tipo, y=lambda,col=tipo), alpha=0.2)+
+  geom_point(data=auau, aes(y=lambda, x=tipo, fill=tipo), 
+             shape=23,size=3, col="black")+
+  scale_color_manual(values=c("#619CFF", "#00BA38", "#F8766D"))+
+  scale_fill_manual(values=c("#619CFF", "#00BA38", "#F8766D"))+
+  ylab("time to phenotypic matching")+
+  xlab("")+
+  theme(legend.position="none")
+ggsave("analitico_obs.pdf", width=5, height = 5)
+
+#################
+
+set.seed(42)
+no.cor <- cor.mut.func(cor.1 = 0, cor.2=0, n.simul=1)
+
+set.seed(42)
+dif.cor <- cor.mut.func(cor.1 = -0.7, cor.2=0.7, n.simul=1)
+
+set.seed(42)
+high.cor <- cor.mut.func(cor.1 = 0.7, cor.2=0.7, n.simul=1)
+
+high.cor[,7:10] <- log(high.cor[,7:10])
+no.cor[,7:10] <- log(no.cor[,7:10])
+dif.cor[,7:10] <- log(dif.cor[,7:10])
+
+high.cor$mean.log <- apply(high.cor[,7:10],1,mean)
+no.cor$mean.log <- apply(no.cor[,7:10],1,mean)
+dif.cor$mean.log <- apply(dif.cor[,7:10],1,mean)
+
+
+ggplot(high.cor[high.cor$geracao<300&high.cor$geracao>10,] )+ geom_path(aes(x=geracao, y=mean.log), col="#F8766D", size=1.5)+
+  geom_path(data=no.cor[no.cor$geracao<300&no.cor$geracao>10,],aes(x=geracao, y=mean.log), col="#619CFF", size=1.5)+
+  geom_path(data=dif.cor[dif.cor$geracao<300&dif.cor$geracao>10,],aes(x=geracao, y=mean.log), col="#00BA38", size=1.5)+
+  xlab("generations")+
+  ylab("log-velocity of\n evolutionary change")
+ggsave("observed_slopes.pdf", width=5, height = 5)
+
+cor.mut[[225]]
