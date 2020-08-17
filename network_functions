@@ -1,0 +1,322 @@
+
+matriz.R.generator <- function(rede){
+  rede <- cbind(rede, rede)
+  require(bipartite)
+  rede<- rede[,order(colnames(rede))]
+  rede<- rbind(rede, rede)
+  rede <- rede[order(rownames(rede)),]
+  rede <- as.one.mode(rede)
+  rownames(rede) <- paste(rownames(rede), ".", rep(c(1,2), times=nrow(rede)/2), sep="")
+  colnames(rede) <- paste(colnames(rede), ".", rep(c(1,2), times=nrow(rede)/2), sep="")
+  rede[seq(2,ncol(rede) ,by=2),seq(1,ncol(rede) ,by=2)] <- 0
+  rede[seq(1,ncol(rede) ,by=2),seq(2,ncol(rede) ,by=2)] <- 0
+  
+  rede<- sweep(rede, 1,rowSums(rede) , `/`)
+  matriz.R <- rede
+  
+  return(matriz.R)
+}
+
+
+
+
+G.matrix.maker <- function(cor=list(animal=0.7, plant=0.0), 
+                           sigma=sqrt(2.0), n.animal=3, n.plant=3, traits=2){
+  require(mvtnorm)
+  
+  G.matrix.maker1 <- function(cor=0.7, sigma=sqrt(2.0)){
+    cor <- matrix(c(1,cor,cor,1), ncol=2) ## correlacao para estimar as correlacoes entre os efeitos pleiotropicos
+    sigma <- c(sigma, sigma) ### variancia para sorteio dos efeitos aditivos dos alelos
+    cov.1 <- sigma %*% t(sigma) ### transformando a matriz de correlcao em matriz de covariancia
+    cov <- cor * cov.1 ## estimando as matrizes de cov com um dado valor de desvio-padrao
+    return(cov)
+  }
+  mat.animal <- list()
+  for(i in 1:n.animal) mat.animal[[i]] <- G.matrix.maker1(cor=cor$animal)
+  mat.plant <- list()
+  for(i in 1:n.plant) mat.plant[[i]] <- G.matrix.maker1(cor=cor$plant)
+  
+  G.mat <- append(mat.plant, mat.animal)
+  Gezao.func <- function(G= G.mat, traits=2){
+    n.species <- 1:length(G)
+    ss <- n.species-1
+    ss <- ss[-1]
+    n.spe <- n.species[-1]
+    Gezao<- matrix(0, ncol= length(G)*traits, nrow= length(G)*traits)
+    Gezao[1:nrow (G[[1]]), 1:ncol(G[[1]])] <- G[[1]]
+    
+    for(i in 1:length(ss)){
+      index<- n.spe[i]+ss[i]
+      index.2 <- index+1
+      Gezao[index:index.2 ,index:index.2] <- G[[1+i]]
+    }
+    return(Gezao)
+  }
+  Gezao <- Gezao.func(G.mat)
+  rownames(Gezao) <- c(paste( rep("plant", times=2*n.plant), 1:(traits*n.plant), sep="-"),paste( rep("animal", 2*n.animal), 1:(2*n.animal), sep="-")) 
+  colnames(Gezao) <- c(paste( rep("plant", times=2*n.plant), 1:(traits*n.plant), sep="-"),paste( rep("animal", 2*n.animal), 1:(2*n.animal), sep="-")) 
+  
+  return(Gezao)
+}
+
+auto.valores.laplacian <- function(Gezao, matriz.R, omega){
+  A <- Gezao%*% solve(omega+Gezao)
+  R <- matriz.R
+  mat.T <-   diag(1,nrow(Gezao))+A%*%R -A
+  auto <- sort(abs(eigen(mat.T)$values), decreasing = TRUE) ## autovalores da matriz T
+  vectors <- (eigen(mat.T)$vectors)
+  return(auto)
+}
+
+
+
+
+cor.mut.func <- function(Gezao, R=matriz.R, n.simul=100, tempo=2000, omega)
+{
+  A <- Gezao%*% solve(omega+Gezao)
+  R <- R
+  mat.T <-  diag(1,nrow(Gezao)) + A%*%R -A
+  auto <- sort(abs(eigen(mat.T)$values)) ## autovalores da matriz T
+  RES <- list()
+  for(j in 1: n.simul){
+    z <- runif(nrow(Gezao),0,1)  #### z inicial!!! mexer aqui se quiser mudar
+    resultados <- matrix(NA, ncol=ncol(Gezao), nrow=tempo)
+    resultados[1,1:ncol(Gezao)] <- z 
+    
+    for (i in 2:tempo){
+      
+      z <- mat.T%*% z
+      
+      resultados[i,1:ncol(Gezao)]=z
+    }
+    RES[[j]] <- resultados
+    
+  }
+  VELS <- list()
+  for(j in 1:n.simul){
+    vel.zs <- matrix(NA, ncol=ncol(Gezao), nrow=tempo)
+    for(i in 1:tempo){
+      vel.zs[i,] <- as.matrix(abs(RES[[j]][i,1:ncol(Gezao)] - RES[[j]][tempo,1:ncol(Gezao)]))
+    }
+    VELS[[j]] <- vel.zs
+    
+    
+  }
+  
+  for(i in 1:n.simul) {
+    RES[[i]] <- as.data.frame(RES[[i]])
+    VELS[[i]] <- as.data.frame(VELS[[i]])
+    RES[[i]]$n.simul <- i
+    RES[[i]]$geracao <- 1:nrow(RES[[i]])
+  }
+  
+  RES<- ldply(RES, "identity")
+  VELS <- ldply(VELS, "identity")
+  colnames(VELS) <- paste("vel", 1:ncol(Gezao), sep="")
+  RES <- cbind(RES,VELS)
+  return(RES)
+}
+
+coef.func <- function(dados){
+  
+  xx<- split(dados, dados$n.simul) 
+  coef <- c()
+  for(i in 1:50){
+    teste <- xx[[i]][1:which(xx[[i]]$log.mean.vel==-Inf)[1]-1,]
+    teste <- teste[teste$geracao>100&teste$geracao<3000,]
+    coef[i]<-  exp(coef(lm(teste$log.mean.vel~teste$geracao))[2]) ### pegando slope
+    #coef[i]<-  (coef(lm(teste$log.mean.vel~teste$geracao))[2]) ### pegando slope
+    
+  }
+  return(coef)  
+}
+
+
+
+
+cor.mut.deviance.func <- function(Gezao, R=matriz.R,z.iniciais, n.simul=100, tempo=2000, omega)
+{
+  A <- Gezao%*% solve(omega+Gezao)
+  R <- R
+  mat.T <-  diag(1,nrow(Gezao)) + A%*%R -A
+  auto <- sort(abs(eigen(mat.T)$values)) ## autovalores da matriz T
+  RES <- list()
+  for(j in 1: n.simul){
+    z <- z.iniciais[[j]] #### z inicial!!! mexer aqui se quiser mudar
+    resultados <- matrix(NA, ncol=ncol(Gezao), nrow=tempo)
+    resultados[1,1:ncol(Gezao)] <- z 
+    
+    for (i in 2:tempo){
+      
+      z <- mat.T%*% z
+      
+      resultados[i,1:ncol(Gezao)]=z
+    }
+    RES[[j]] <- resultados
+    
+  }
+  VELS <- list()
+  for(j in 1:n.simul){
+    vel.zs <- matrix(NA, ncol=ncol(Gezao), nrow=tempo)
+    for(i in 1:tempo){
+      vel.zs[i,] <- as.matrix(abs(RES[[j]][i,1:ncol(Gezao)] - RES[[j]][tempo,1:ncol(Gezao)]))
+    }
+    VELS[[j]] <- vel.zs
+    
+    
+  }
+  
+  for(i in 1:n.simul) {
+    RES[[i]] <- as.data.frame(RES[[i]])
+    VELS[[i]] <- as.data.frame(VELS[[i]])
+    RES[[i]]$n.simul <- i
+    RES[[i]]$geracao <- 1:nrow(RES[[i]])
+  }
+  
+  RES<- ldply(RES, "identity")
+  VELS <- ldply(VELS, "identity")
+  colnames(VELS) <- paste("vel", 1:ncol(Gezao), sep="")
+  colnames(RES)[1:ncol(R)] <- colnames(R)
+  RES <- cbind(RES,VELS)
+  return(RES)
+}
+
+max.sub.func <- function(rede){
+  max.degree <- matrix(NA, ncol=ncol(rede), nrow=nrow(rede))
+  
+  
+  for(i in 1: nrow(rede)){
+    for(j in 1: ncol(rede)){
+      if(rede[i,j]==1){
+        max.degree[i,j] = max(colSums(rede)[j],
+                              rowSums(rede)[i])
+        
+      }else{max.degree[i,j]<- NA}
+    }
+  }
+  max.degree
+  
+  
+  sub.degree <- matrix(NA, ncol=ncol(rede), nrow=nrow(rede))
+  
+  
+  for(i in 1: nrow(rede)){
+    for(j in 1: ncol(rede)){
+      if(rede[i,j]==1){
+        sub.degree[i,j] = abs(colSums(rede)[j]-
+                                rowSums(rede)[i])
+        
+      }else{sub.degree[i,j]<- NA}
+    }
+  }
+  sub.degree
+  
+  sub.degree <- as.vector(sub.degree)
+  
+  names(sub.degree) <- paste(rep(paste( "A", 1:ncol(rede), sep="."), each=nrow(rede)),
+                             rep(paste("P", 1:nrow(rede), sep="."), times=ncol(rede)), sep="_")
+  
+  max.degree<- as.vector(max.degree)
+  names(max.degree) <- names(sub.degree)
+  
+  plot.degree <- data.frame(max.degree, sub.degree)
+  plot.degree <- plot.degree[complete.cases(plot.degree),]
+  return(plot.degree) 
+}
+
+
+G.matrix.maker.pops <- function(cor=list(animal=runif(ncol(ani.rede[[16]]), -0.38,0.84), plant=runif(nrow(ani.rede[[16]]), -0.43,0.40)), 
+                                sigma=sqrt(2.0), n.animal=ncol(ani.rede[[16]]), n.plant=nrow(ani.rede[[16]]), traits=2){
+  require(mvtnorm)
+  G.matrix.maker1 <- function(cor=0.7, sigma=sqrt(2.0)){
+    cor <- matrix(c(1,cor,cor,1), ncol=2) ## correlacao para estimar as correlacoes entre os efeitos pleiotropicos
+    sigma <- c(sigma, sigma) ### variancia para sorteio dos efeitos aditivos dos alelos
+    cov.1 <- sigma %*% t(sigma) ### transformando a matriz de correlcao em matriz de covariancia
+    cov <- cor * cov.1 ## estimando as matrizes de cov com um dado valor de desvio-padrao
+    return(cov)
+  }
+  
+  
+  mat.animal <- list()
+  for(i in 1:n.animal) mat.animal[[i]] <- G.matrix.maker1(cor=cor$animal[i])
+  mat.plant <- list()
+  for(i in 1:n.plant) mat.plant[[i]] <- G.matrix.maker1(cor=cor$plant[i])
+  
+  G.mat <- append(mat.plant, mat.animal)
+  Gezao.func <- function(G= G.mat, traits=2){
+    n.species <- 1:length(G)
+    ss <- n.species-1
+    ss <- ss[-1]
+    n.spe <- n.species[-1]
+    Gezao<- matrix(0, ncol= length(G)*traits, nrow= length(G)*traits)
+    Gezao[1:nrow (G[[1]]), 1:ncol(G[[1]])] <- G[[1]]
+    
+    for(i in 1:length(ss)){
+      index<- n.spe[i]+ss[i]
+      index.2 <- index+1
+      Gezao[index:index.2 ,index:index.2] <- G[[1+i]]
+    }
+    return(Gezao)
+  }
+  Gezao <- Gezao.func(G.mat)
+  rownames(Gezao) <- c(paste( rep("plant", times=2*n.plant), 1:(traits*n.plant), sep="-"),paste( rep("animal", 2*n.animal), 1:(2*n.animal), sep="-")) 
+  colnames(Gezao) <- c(paste( rep("plant", times=2*n.plant), 1:(traits*n.plant), sep="-"),paste( rep("animal", 2*n.animal), 1:(2*n.animal), sep="-")) 
+  
+  return(Gezao)
+}
+
+
+
+remover.zeros <- function(matriz){
+  reps.rows <- which(rowSums(matriz)== 0) 
+  reps.col <- which(colSums(matriz)== 0) 
+  rep.names.row <-names(reps.rows)
+  rep.names.col <-names(reps.col)
+  
+  if(length(rep.names.row)==0){
+    matriz <- matriz
+  } else { for( i in 1: length(rep.names.row)){matriz <- matriz[rownames(matriz)!=rep.names.row[i],]}
+  }  
+
+  if(length(rep.names.col)==0){
+    matriz <- matriz
+  } else { for( i in 1: length(rep.names.col)){matriz <- matriz[,colnames(matriz)!=rep.names.col[i]]}
+  }  
+  
+  
+    return(matriz)
+} ## funcao que automaticamente remover as linhas e colunas que somam zero
+
+
+diver.func.sim <- function(rede, n.simul=50){
+  N<- 2*nrow(rede)+2*ncol(rede)
+  matriz.R <- matriz.R.generator(rede)
+  omega=diag(10,nrow(matriz.R),nrow(matriz.R)) #### number of species*traits second and third number
+  z.iniciais.1 <-  matrix(runif(N*n.simul,0,10),ncol=N, nrow=100)
+  sim<- c()
+  
+  for(i in 1:n.simul){
+    sim[i]<- divergence.func.2(rede=rede, z.iniciais=z.iniciais.1[i,], matriz.R=matriz.R, omega=omega)  
+  }
+  return(sim)
+}
+
+divergence.func.2 <- function(n.populations=10, rede,  z.iniciais, matriz.R, omega){
+  zf.2=NULL
+  R <- matriz.R
+  for(i in 1:n.populations){
+    Gezao <- G.matrix.maker.pops(cor=list(animal=runif(ncol(rede), -0.38,0.84), plant=runif(nrow(rede), -0.43,0.40)),
+                                 n.animal=ncol(rede), n.plant=nrow(rede))
+    A <- Gezao%*% solve(omega+Gezao)
+    mat.T <-  diag(1,nrow(Gezao)) + A%*%R -A
+    zf = (mat.T%^%1000) %*% z.iniciais
+    zf.2 <- cbind(zf.2,zf)
+  }
+  
+  res<- mean(apply(cbind(zf.2),1,sd))
+  return(res)
+  
+}
+
+
+
