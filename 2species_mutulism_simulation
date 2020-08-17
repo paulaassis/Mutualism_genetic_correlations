@@ -1,0 +1,122 @@
+require(dplyr)
+require(plyr)
+#### simulations for 2 species model
+
+##### parametros iniciais
+omega=diag(42,4,4) ### omega matrix (no correlational selection, first value indicate the slope of adaptive landscape)
+
+mut.1 <- seq(-0.7,0.7,by=0.1) ## parametric space of correlations to simulate
+mut.2 <- seq(-0.7,0.7,by=0.1)
+
+x <- expand.grid(mut.1, mut.2)
+
+
+### functions to simnulation
+
+## create a G-matrix, cor= correlation, sigma= genetic variance
+G.matrix.maker <- function(cor=0.7, sigma=sqrt(2.0)){
+  require(mvtnorm)
+  cor <- matrix(c(1,cor,cor,1), ncol=2) ## correlacao para estimar as correlacoes entre os efeitos pleiotropicos
+  sigma <- c(sigma, sigma) ### variancia para sorteio dos efeitos aditivos dos alelos
+  cov.1 <- sigma %*% t(sigma) ### transformando a matriz de correlcao em matriz de covariancia
+  cov <- cor * cov.1 ## estimando as matrizes de cov com um dado valor de desvio-padrao
+  return(cov)
+}
+
+
+## combine G matrix between species
+Gezao.func <- function(Ga, Gb){
+  Gezao <- matrix(0, ncol=c(ncol(Ga)+ncol(Gb)), nrow=c(ncol(Ga)+ncol(Gb)))
+  Gezao[1: ncol(Ga),1:nrow(Ga) ] <-  Ga
+  Gezao[(ncol(Ga)+1): (ncol(Ga)+ ncol(Ga)),(nrow(Ga)+1):(nrow(Ga)+ nrow(Ga))]<-  Gb
+  return(Gezao)
+  
+}
+
+## interaction matrix
+matriz.R.func  <- function( n.traits=2){
+  
+  vetor.ordem <-  c((1+n.traits):(n.traits+n.traits) ,1:n.traits)
+  matriz.R <- matrix(0, nrow= 2*n.traits, ncol=2*n.traits)
+  
+  for(i in 1:ncol(matriz.R)) matriz.R[i,vetor.ordem[i]] <- 1
+  return(matriz.R)
+}
+
+#####################
+### Simulation function
+
+cor.mut.func <- function(cor.1,cor.2, n.simul=100, tempo=500)
+{
+  Ga <- G.matrix.maker(cor= cor.1)
+  Gb <- G.matrix.maker(cor= cor.2)
+  Gezao <- Gezao.func(Ga,Gb)
+  A <- Gezao%*% solve(omega+Gezao)
+  R <- matriz.R.func()
+  mat.T <-  diag(1,4) + A%*%R -A
+   RES <- list()
+  for(j in 1: n.simul){
+    
+    z <- runif(4,0,10)  #### z inicial!!! mexer aqui se quiser mudar
+    resultados <- matrix(NA, ncol=4, nrow=tempo)
+    
+    for (i in 1:tempo){
+      
+      z <- mat.T%*% z
+      
+      resultados[i,]=z
+    }
+    RES[[j]] <- resultados
+    
+  }
+  
+  VELS <- list()
+  for(j in 1:n.simul){
+    vel.zs <- matrix(NA, ncol=4, nrow=tempo)
+    for(i in 1:tempo){
+      vel.zs[i,] <- as.matrix(abs(RES[[j]][i,1:4] - RES[[j]][tempo,1:4]))
+    }
+    VELS[[j]] <- vel.zs
+  }
+  
+  for(i in 1:n.simul) {
+    RES[[i]] <- as.data.frame(RES[[i]])
+    VELS[[i]] <- as.data.frame(VELS[[i]])
+    RES[[i]]$n.simul <- i
+    RES[[i]]$geracao <- 1:nrow(RES[[i]])
+  }
+  
+  RES<- ldply(RES, "identity") 
+  VELS <- ldply(VELS, "identity")
+  colnames(VELS) <- paste("vel", 1:4, sep="")
+  RES <- cbind(RES,VELS)
+  
+  return(RES)
+}
+
+
+
+cor.mut.func(cor.1=0, cor.2=0) ## colunms 1 to 4 is the 2 traits in each species in each generation
+
+oi<- list()
+
+
+for(i in 1: nrow(x)){
+  oi[[i]]<- cor.mut.func(cor.1=x[i,1], cor.2=x[i,2])
+}
+
+
+for(i in 1: nrow(x)){
+oi[[i]]$dist.euc <- sqrt(rowSums((oi[[i]][,1:2] - oi[[i]][,3:4])^2))
+oi[[i]]$cor.a <- x[i,1]
+oi[[i]]$cor.b <- x[i,2]
+}
+
+
+cor.mut<-oi
+
+
+########### 
+##########
+
+
